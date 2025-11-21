@@ -40,6 +40,12 @@ namespace Nexus.Networking
             // Enable camera and controls only for local player
             if (playerCamera != null)
             {
+                // Disable any existing MainCamera in the scene (e.g. the lobby camera)
+                if (Camera.main != null && Camera.main != playerCamera)
+                {
+                    Camera.main.gameObject.SetActive(false);
+                }
+
                 playerCamera.enabled = true;
                 playerCamera.tag = "MainCamera";
                 
