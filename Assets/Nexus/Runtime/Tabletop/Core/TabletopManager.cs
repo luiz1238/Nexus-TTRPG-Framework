@@ -471,6 +471,15 @@ namespace Nexus
         /// </summary>
         private void FindLocalPlayerCamera()
         {
+            if (boundLocalPlayer != null)
+            {
+                var cam = boundLocalPlayer.GetComponentInChildren<Camera>(true);
+                if (cam != null && cam.enabled && cam.gameObject.activeInHierarchy)
+                {
+                    mainCamera = cam;
+                    return;
+                }
+            }
             Camera[] cameras = Object.FindObjectsOfType<Camera>();
             
             // First pass: strictly prefer the local player's camera
