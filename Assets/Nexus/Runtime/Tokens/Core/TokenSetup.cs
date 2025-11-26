@@ -59,6 +59,8 @@ public class TokenSetup : MonoBehaviour
     private Rigidbody rb;
     private BoxCollider boxCollider;
     private Camera mainCamera;
+    private static Camera globalCameraRef;
+    public static void SetGlobalCamera(Camera cam) { globalCameraRef = cam; }
     private Transform spriteTransform;
     private SpriteRenderer spriteRenderer;
     private Material spriteMaterial;
@@ -97,7 +99,14 @@ public class TokenSetup : MonoBehaviour
     
     private void Start()
     {
-        FindLocalPlayerCamera();
+        if (globalCameraRef != null)
+        {
+            mainCamera = globalCameraRef;
+        }
+        else
+        {
+            FindLocalPlayerCamera();
+        }
         
         // Store default sprite if not assigned
         if (defaultSprite == null && spriteRenderer != null)
@@ -120,11 +129,32 @@ public class TokenSetup : MonoBehaviour
         // Find local player camera if not found yet (for multiplayer)
         if (mainCamera == null)
         {
-            FindLocalPlayerCamera();
+            if (globalCameraRef != null)
+                mainCamera = globalCameraRef;
+            else
+                FindLocalPlayerCamera();
         }
         
-        // Check if center of screen is pointing at this token (same as TabletopManager)
-        CheckCenterScreenOver();
+        // Only raycast to check focus when relevant keys are pressed
+        bool stateKey =
+            Input.GetKeyDown(KeyCode.Alpha1) || Input.GetKeyDown(KeyCode.Keypad1) ||
+            Input.GetKeyDown(KeyCode.Alpha2) || Input.GetKeyDown(KeyCode.Keypad2) ||
+            Input.GetKeyDown(KeyCode.Alpha3) || Input.GetKeyDown(KeyCode.Keypad3) ||
+            Input.GetKeyDown(KeyCode.Alpha4) || Input.GetKeyDown(KeyCode.Keypad4) ||
+            Input.GetKeyDown(KeyCode.Alpha5) || Input.GetKeyDown(KeyCode.Keypad5) ||
+            Input.GetKeyDown(KeyCode.Alpha6) || Input.GetKeyDown(KeyCode.Keypad6);
+        bool scaleKey =
+            Input.GetKeyDown(KeyCode.Equals) || Input.GetKeyDown(KeyCode.Plus) || Input.GetKeyDown(KeyCode.KeypadPlus) ||
+            Input.GetKeyDown(KeyCode.Minus) || Input.GetKeyDown(KeyCode.KeypadMinus);
+        
+        if (stateKey || scaleKey)
+        {
+            CheckCenterScreenOver();
+        }
+        else
+        {
+            isCenterScreenOver = false;
+        }
         
         // Handle state changes only when center screen is over token
         if (isCenterScreenOver)

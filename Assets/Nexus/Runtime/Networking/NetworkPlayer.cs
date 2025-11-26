@@ -40,6 +40,12 @@ namespace Nexus.Networking
             // Enable camera and controls only for local player
             if (playerCamera != null)
             {
+                // Disable any existing MainCamera in the scene (e.g. the lobby camera)
+                if (Camera.main != null && Camera.main != playerCamera)
+                {
+                    Camera.main.gameObject.SetActive(false);
+                }
+
                 playerCamera.enabled = true;
                 playerCamera.tag = "MainCamera";
                 
@@ -99,11 +105,25 @@ namespace Nexus.Networking
                 // Ensure our camera renders on top
                 playerCamera.depth = 100f;
 
+                // Provide camera to systems that search it expensively
+                try { TokenSetup.SetGlobalCamera(playerCamera); } catch { }
+                try { Nexus.LightCulling.SetPlayerCamera(playerCamera.gameObject); } catch { }
+
                 var allCameras = Object.FindObjectsOfType<Camera>();
                 Debug.Log($"Cameras after local init: count={allCameras.Length}");
                 foreach (var cam in allCameras)
                 {
                     var owner = cam.GetComponentInParent<NetworkPlayer>();
+                    if (cam != playerCamera)
+                    {
+                        // Disable all cameras that are not the local player's camera
+                        if (owner == null || !owner.isLocalPlayer)
+                        {
+                            cam.enabled = false;
+                            var al = cam.GetComponent<AudioListener>();
+                            if (al != null) al.enabled = false;
+                        }
+                    }
                     Debug.Log($" - cam='{cam.name}' enabled={cam.enabled} depth={cam.depth} clear={cam.clearFlags} tag={cam.tag} targetTex={(cam.targetTexture!=null?cam.targetTexture.name:"null")} owner={(owner!=null?(owner.isLocalPlayer?"local":"remote"):"none")} ");
                 }
 

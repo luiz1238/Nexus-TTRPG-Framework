@@ -39,10 +39,13 @@ public class MirrorLocalCameraRig : NetworkBehaviour
 
         if (disableSceneRigIfLocal)
         {
-            var sceneRig = FindObjectOfType<CameraRigController>();
-            if (sceneRig && sceneRig.gameObject.scene.IsValid())
+            var sceneRigs = Object.FindObjectsOfType<CameraRigController>(true);
+            foreach (var r in sceneRigs)
             {
-                sceneRig.gameObject.SetActive(false);
+                if (r && r.gameObject.scene.IsValid())
+                {
+                    r.gameObject.SetActive(false);
+                }
             }
         }
 
