@@ -13,6 +13,7 @@ namespace Nexus.Networking
     {
         private TokenSetup tokenSetup;
         private Rigidbody cachedRb;
+        private NetworkSmoother smoother;
         
         [Header("Sync Settings")]
         [SerializeField] private float positionThreshold = 0.01f;
@@ -71,22 +72,10 @@ namespace Nexus.Networking
             Quaternion rot = reader.ReadQuaternion();
             syncPosition = pos;
             syncRotation = rot;
-            // enqueue snapshot with server-provided time
-            if (!NetworkServer.active)
+            // forward snapshot to shared smoother
+            if (!NetworkServer.active && smoother != null)
             {
-                Snapshot s;
-                s.time = t;
-                s.pos = pos;
-                s.rot = rot;
-                snapshots.Add(s);
-                double cutoff = Mirror.NetworkTime.time - 1.0;
-                int start = 0;
-                for (; start < snapshots.Count; start++)
-                {
-                    if (snapshots[start].time >= cutoff) break;
-                }
-                if (start > 0) snapshots.RemoveRange(0, start);
-                if (snapshots.Count > 64) snapshots.RemoveRange(0, snapshots.Count - 64);
+                smoother.AddSnapshot(t, pos, rot);
             }
             // then deserialize SyncVars
             base.OnDeserialize(reader, initialState);
@@ -104,6 +93,8 @@ namespace Nexus.Networking
         {
             tokenSetup = GetComponent<TokenSetup>();
             cachedRb = GetComponent<Rigidbody>();
+            smoother = GetComponent<NetworkSmoother>();
+            if (smoother == null) smoother = gameObject.AddComponent<NetworkSmoother>();
             this.syncInterval = 0.02f; // ~50 Hz
         }
 
@@ -122,9 +113,9 @@ namespace Nexus.Networking
         public override void OnStartClient()
         {
             base.OnStartClient();
-            if (!NetworkServer.active)
+            if (!NetworkServer.active && smoother != null)
             {
-                snapshots.Clear();
+                smoother.Clear();
             }
         }
 
@@ -162,12 +153,10 @@ namespace Nexus.Networking
                 // If this local client is the drag owner, don't override their local visual control
                 uint localId = Mirror.NetworkClient.localPlayer != null ? Mirror.NetworkClient.localPlayer.netId : 0u;
                 bool iAmDragOwner = syncDragging && dragOwnerNetId != 0u && localId == dragOwnerNetId;
-                if (localDragOwner || iAmDragOwner)
+                if (smoother != null)
                 {
-                    // Owner drives visuals locally during drag; server state reconciles after release
-                    return;
+                    smoother.PauseSmoothing = (localDragOwner || iAmDragOwner);
                 }
-                ApplySnapshotInterpolation();
             }
         }
 
@@ -355,19 +344,19 @@ namespace Nexus.Networking
                 cachedRb.rotation = rotation;
             }
             transform.SetPositionAndRotation(position, rotation);
-            // reset interpolation buffer so we don't lerp away from final pose
-            snapshots.Clear();
-            Snapshot s;
-            s.time = Mirror.NetworkTime.time;
-            s.pos = position;
-            s.rot = rotation;
-            snapshots.Add(s);
+            if (smoother != null)
+            {
+                smoother.SnapTo(position, rotation);
+            }
         }
         
         [ClientRpc]
         private void RpcClearSnapshots()
         {
-            snapshots.Clear();
+            if (smoother != null)
+            {
+                smoother.Clear();
+            }
         }
 
         private void OnDraggingChanged(bool oldVal, bool newVal)

@@ -16,6 +16,8 @@ namespace Nexus.Networking
         [SerializeField] private PlayerController playerController;
         [SerializeField] private TabletopManager tabletopManager;
 
+        public Camera PlayerCamera => playerCamera;
+
         [Header("Player Info")]
         [SyncVar] public string playerName = "Player";
         [SyncVar] public Color playerColor = Color.white;
@@ -36,6 +38,10 @@ namespace Nexus.Networking
         public override void OnStartLocalPlayer()
         {
             base.OnStartLocalPlayer();
+            if (Application.isPlaying)
+            {
+                DontDestroyOnLoad(gameObject);
+            }
             
             // Enable camera and controls only for local player
             if (playerCamera != null)
@@ -61,6 +67,7 @@ namespace Nexus.Networking
                 playerCamera.targetTexture = null;
                 playerCamera.targetDisplay = 0;
 
+#if false
                 var urpType = System.Type.GetType("UnityEngine.Rendering.Universal.UniversalAdditionalCameraData, Unity.RenderPipelines.Universal.Runtime");
                 if (urpType != null)
                 {
@@ -101,13 +108,18 @@ namespace Nexus.Networking
                         }
                     }
                 }
+#endif
 
                 // Ensure our camera renders on top
                 playerCamera.depth = 100f;
 
-                // Provide camera to systems that search it expensively
-                try { TokenSetup.SetGlobalCamera(playerCamera); } catch { }
-                try { Nexus.LightCulling.SetPlayerCamera(playerCamera.gameObject); } catch { }
+                // Register with CameraManager
+                if (Nexus.CameraManager.Instance != null)
+                {
+                    Nexus.CameraManager.Instance.RegisterCamera(playerCamera);
+                }
+
+
 
                 var allCameras = Object.FindObjectsOfType<Camera>();
                 Debug.Log($"Cameras after local init: count={allCameras.Length}");
@@ -279,6 +291,14 @@ namespace Nexus.Networking
             {
                 identity.transform.position = position;
                 RpcMoveToken(identity.netId, position);
+            }
+        }
+
+        private void OnDisable()
+        {
+            if (isLocalPlayer && playerCamera != null && Nexus.CameraManager.Instance != null)
+            {
+                Nexus.CameraManager.Instance.UnregisterCamera(playerCamera);
             }
         }
     }

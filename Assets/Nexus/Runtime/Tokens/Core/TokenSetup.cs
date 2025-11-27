@@ -1,4 +1,5 @@
 using UnityEngine;
+using Nexus;
 
 [RequireComponent(typeof(BoxCollider))]
 public class TokenSetup : MonoBehaviour
@@ -59,8 +60,7 @@ public class TokenSetup : MonoBehaviour
     private Rigidbody rb;
     private BoxCollider boxCollider;
     private Camera mainCamera;
-    private static Camera globalCameraRef;
-    public static void SetGlobalCamera(Camera cam) { globalCameraRef = cam; }
+
     private Transform spriteTransform;
     private SpriteRenderer spriteRenderer;
     private Material spriteMaterial;
@@ -71,10 +71,16 @@ public class TokenSetup : MonoBehaviour
     private float lastSnapTime;
     private bool snapInit;
     public bool externalDragActive = false;
+    private float supportBaselineY;
+    private bool supportBaselineInit;
+    private Vector3 lastXZPos;
     
     // State tracking
     private int currentState = 1;
     private bool isCenterScreenOver = false;
+    private Camera playerCamera;
+    private float squashOffset;
+    private Vector3 targetScale;
     
     private void Awake()
     {
@@ -99,13 +105,13 @@ public class TokenSetup : MonoBehaviour
     
     private void Start()
     {
-        if (globalCameraRef != null)
+        if (Nexus.CameraManager.Instance != null)
         {
-            mainCamera = globalCameraRef;
+            mainCamera = Nexus.CameraManager.Instance.MainCamera;
         }
         else
         {
-            FindLocalPlayerCamera();
+            if (Camera.main != null) mainCamera = Camera.main;
         }
         
         // Store default sprite if not assigned
@@ -122,6 +128,19 @@ public class TokenSetup : MonoBehaviour
         ApplyScale(currentScale);
         if (spriteTransform != null) { spriteBaseScale = spriteTransform.localScale; }
         if (groundSnap && snapOnStart) SnapImmediate();
+        Bounds initBounds;
+        if (boxCollider != null)
+            initBounds = boxCollider.bounds;
+        else if (!TryGetCombinedBounds(out initBounds))
+            initBounds = new Bounds(transform.position, Vector3.zero);
+        supportBaselineY = initBounds.min.y;
+        if (spriteRenderer != null)
+        {
+            float spriteBottomY = spriteRenderer.bounds.min.y;
+            if (spriteBottomY < supportBaselineY) supportBaselineY = spriteBottomY;
+        }
+        supportBaselineInit = true;
+        lastXZPos = transform.position;
     }
     
     private void Update()
@@ -129,23 +148,23 @@ public class TokenSetup : MonoBehaviour
         // Find local player camera if not found yet (for multiplayer)
         if (mainCamera == null)
         {
-            if (globalCameraRef != null)
-                mainCamera = globalCameraRef;
-            else
-                FindLocalPlayerCamera();
+            if (Nexus.CameraManager.Instance != null)
+                mainCamera = Nexus.CameraManager.Instance.MainCamera;
+            else if (Camera.main != null)
+                mainCamera = Camera.main;
         }
         
         // Only raycast to check focus when relevant keys are pressed
         bool stateKey =
-            Input.GetKeyDown(KeyCode.Alpha1) || Input.GetKeyDown(KeyCode.Keypad1) ||
-            Input.GetKeyDown(KeyCode.Alpha2) || Input.GetKeyDown(KeyCode.Keypad2) ||
-            Input.GetKeyDown(KeyCode.Alpha3) || Input.GetKeyDown(KeyCode.Keypad3) ||
-            Input.GetKeyDown(KeyCode.Alpha4) || Input.GetKeyDown(KeyCode.Keypad4) ||
-            Input.GetKeyDown(KeyCode.Alpha5) || Input.GetKeyDown(KeyCode.Keypad5) ||
-            Input.GetKeyDown(KeyCode.Alpha6) || Input.GetKeyDown(KeyCode.Keypad6);
+            InputManager.Instance.GetDown(InputAction.TokenState1) ||
+            InputManager.Instance.GetDown(InputAction.TokenState2) ||
+            InputManager.Instance.GetDown(InputAction.TokenState3) ||
+            InputManager.Instance.GetDown(InputAction.TokenState4) ||
+            InputManager.Instance.GetDown(InputAction.TokenState5) ||
+            InputManager.Instance.GetDown(InputAction.TokenState6);
         bool scaleKey =
-            Input.GetKeyDown(KeyCode.Equals) || Input.GetKeyDown(KeyCode.Plus) || Input.GetKeyDown(KeyCode.KeypadPlus) ||
-            Input.GetKeyDown(KeyCode.Minus) || Input.GetKeyDown(KeyCode.KeypadMinus);
+            InputManager.Instance.GetDown(InputAction.TokenScaleUp) ||
+            InputManager.Instance.GetDown(InputAction.TokenScaleDown);
         
         if (stateKey || scaleKey)
         {
@@ -160,37 +179,37 @@ public class TokenSetup : MonoBehaviour
         if (isCenterScreenOver)
         {
             // State changes
-            if (Input.GetKeyDown(KeyCode.Alpha1) || Input.GetKeyDown(KeyCode.Keypad1))
+            if (InputManager.Instance.GetDown(InputAction.TokenState1))
             {
                 SetState(1);
             }
-            else if (Input.GetKeyDown(KeyCode.Alpha2) || Input.GetKeyDown(KeyCode.Keypad2))
+            else if (InputManager.Instance.GetDown(InputAction.TokenState2))
             {
                 SetState(2);
             }
-            else if (Input.GetKeyDown(KeyCode.Alpha3) || Input.GetKeyDown(KeyCode.Keypad3))
+            else if (InputManager.Instance.GetDown(InputAction.TokenState3))
             {
                 SetState(3);
             }
-            else if (Input.GetKeyDown(KeyCode.Alpha4) || Input.GetKeyDown(KeyCode.Keypad4))
+            else if (InputManager.Instance.GetDown(InputAction.TokenState4))
             {
                 SetState(4);
             }
-            else if (Input.GetKeyDown(KeyCode.Alpha5) || Input.GetKeyDown(KeyCode.Keypad5))
+            else if (InputManager.Instance.GetDown(InputAction.TokenState5))
             {
                 SetState(5);
             }
-            else if (Input.GetKeyDown(KeyCode.Alpha6) || Input.GetKeyDown(KeyCode.Keypad6))
+            else if (InputManager.Instance.GetDown(InputAction.TokenState6))
             {
                 SetState(6);
             }
             
             // Scale changes
-            if (Input.GetKeyDown(KeyCode.Equals) || Input.GetKeyDown(KeyCode.Plus) || Input.GetKeyDown(KeyCode.KeypadPlus))
+            if (InputManager.Instance.GetDown(InputAction.TokenScaleUp))
             {
                 IncreaseScale();
             }
-            else if (Input.GetKeyDown(KeyCode.Minus) || Input.GetKeyDown(KeyCode.KeypadMinus))
+            else if (InputManager.Instance.GetDown(InputAction.TokenScaleDown))
             {
                 DecreaseScale();
             }
@@ -487,6 +506,29 @@ public class TokenSetup : MonoBehaviour
             return;
 
         float currentBottomY = bounds.min.y;
+        if (spriteRenderer != null)
+        {
+            float spriteBottomY = spriteRenderer.bounds.min.y;
+            if (spriteBottomY < currentBottomY) currentBottomY = spriteBottomY;
+        }
+        if (!supportBaselineInit)
+        {
+            supportBaselineY = currentBottomY;
+            supportBaselineInit = true;
+            lastXZPos = transform.position;
+        }
+        Vector2 lastXZ = new Vector2(lastXZPos.x, lastXZPos.z);
+        Vector2 curXZ = new Vector2(transform.position.x, transform.position.z);
+        if ((curXZ - lastXZ).sqrMagnitude > 0.0001f)
+        {
+            supportBaselineY = currentBottomY;
+            lastXZPos = transform.position;
+        }
+        if (targetBottomY > supportBaselineY + snapStepUpMax)
+            targetBottomY = supportBaselineY + snapStepUpMax;
+        if (targetBottomY < supportBaselineY)
+            supportBaselineY = targetBottomY;
+
         float delta = targetBottomY - currentBottomY;
         if (Mathf.Abs(delta) > 0.0001f)
         {
@@ -501,6 +543,7 @@ public class TokenSetup : MonoBehaviour
                 float k = 1f - Mathf.Exp(-snapLerpSpeed * Time.deltaTime);
                 transform.position = Vector3.Lerp(transform.position, targetPos, k);
             }
+            supportBaselineY = targetBottomY;
         }
     }
 
@@ -509,6 +552,11 @@ public class TokenSetup : MonoBehaviour
         if (!TryComputeTargetBottomY(out float targetBottomY, out Bounds bounds))
             return;
         float currentBottomY = bounds.min.y;
+        if (spriteRenderer != null)
+        {
+            float spriteBottomY = spriteRenderer.bounds.min.y;
+            if (spriteBottomY < currentBottomY) currentBottomY = spriteBottomY;
+        }
         float delta = targetBottomY - currentBottomY;
         if (Mathf.Abs(delta) > 0.0001f)
         {
@@ -554,6 +602,12 @@ public class TokenSetup : MonoBehaviour
         }
 
         float currentBottomY = bounds.min.y;
+        if (spriteRenderer != null)
+        {
+            float spriteBottomY = spriteRenderer.bounds.min.y;
+            if (spriteBottomY < currentBottomY) currentBottomY = spriteBottomY;
+        }
+        float allowedMaxY = currentBottomY + snapStepUpMax;
         float chosenY;
         if (centerOK)
         {
@@ -567,6 +621,9 @@ public class TokenSetup : MonoBehaviour
             {
                 // Moving up or staying level: choose the safer (higher) support to avoid sinking on irregular ground
                 float supportY = supportOK ? supportHit.point.y : centerY;
+                // Clamp upward step to allowedMaxY to avoid jumping onto ceilings/upper floors in one step
+                centerY = Mathf.Min(centerY, allowedMaxY);
+                supportY = Mathf.Min(supportY, allowedMaxY);
                 chosenY = Mathf.Max(centerY, supportY);
             }
         }
@@ -600,7 +657,9 @@ public class TokenSetup : MonoBehaviour
             else
             {
                 // Otherwise, stay supported by the highest surface under footprint
-                chosenY = supportHit.point.y;
+                float supportY = supportHit.point.y;
+                supportY = Mathf.Min(supportY, allowedMaxY);
+                chosenY = supportY;
             }
         }
 
@@ -711,6 +770,8 @@ public class TokenSetup : MonoBehaviour
             if (ht == null) continue;
             if (ht == self || ht.IsChildOf(self)) continue; // ignore own colliders
             if (h.normal.y < minGroundNormalY) continue; // skip vertical/near-vertical faces
+            // Avoid ceilings/roofs: ignore surfaces above camera height if camera is available
+            if (mainCamera != null && h.point.y > mainCamera.transform.position.y + 0.01f) continue;
             if (h.distance < best)
             {
                 best = h.distance;

@@ -15,12 +15,23 @@ public class CameraTokenPicker : MonoBehaviour
 
     void Awake()
     {
-        if (!rayCamera) rayCamera = Camera.main;
+        if (!rayCamera)
+        {
+            rayCamera = (Nexus.CameraManager.Instance != null ? Nexus.CameraManager.Instance.MainCamera : Camera.main);
+        }
         if (!rig) rig = FindObjectOfType<CameraRigController>();
     }
 
     void Update()
     {
+        // Refresh ray camera each frame to follow active player camera
+        if (Nexus.CameraManager.Instance != null && Nexus.CameraManager.Instance.MainCamera != null)
+            rayCamera = Nexus.CameraManager.Instance.MainCamera;
+        else if (!rayCamera)
+            rayCamera = Camera.main;
+
+        if (rayCamera == null) return;
+
         if (Input.GetMouseButtonDown(0))
         {
             if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject())

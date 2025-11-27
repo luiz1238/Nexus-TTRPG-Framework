@@ -248,11 +248,12 @@ public class TokenSpawnerUI : MonoBehaviour
     
     private Vector3 CalculateSpawnPosition()
     {
-        // Use center of screen raycast (where player is looking)
-        Ray ray = mainCamera.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0));
-        
+        // Use mouse position on screen to raycast, clamp max distance to prevent horizon spawns
+        Ray ray = mainCamera.ScreenPointToRay(Input.mousePosition);
+
         int mask = spawnSurfaceMask.value != 0 ? spawnSurfaceMask.value : Physics.DefaultRaycastLayers;
-        RaycastHit[] hits = Physics.RaycastAll(ray, maxRaycastDistance, mask, QueryTriggerInteraction.Ignore);
+        float clampDistance = Mathf.Min(maxRaycastDistance, 15f);
+        RaycastHit[] hits = Physics.RaycastAll(ray, clampDistance, mask, QueryTriggerInteraction.Ignore);
         System.Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
         var localPlayer = Mirror.NetworkClient.isConnected ? FindLocalNetworkPlayer() : null;
         Transform localRoot = localPlayer != null ? localPlayer.transform : null;
@@ -263,11 +264,11 @@ public class TokenSpawnerUI : MonoBehaviour
             if (hits[i].normal.y >= 0.4f && hits[i].point.y <= camY + 0.01f)
                 return hits[i].point; // prefer walkable surfaces below or at camera height
         }
-        
-        // Fallback: spawn at fixed distance in front of camera, then drop to ground if any
-        Vector3 forwardPoint = mainCamera.transform.position + mainCamera.transform.forward * spawnDistance;
+
+        // Fallback: fixed forward clamp, then drop to ground
+        Vector3 forwardPoint = mainCamera.transform.position + mainCamera.transform.forward * Mathf.Max(1f, Mathf.Min(clampDistance, spawnDistance));
         int maskDown = spawnSurfaceMask.value != 0 ? spawnSurfaceMask.value : Physics.DefaultRaycastLayers;
-        RaycastHit[] downs = Physics.RaycastAll(new Ray(forwardPoint + Vector3.up * 10f, Vector3.down), maxRaycastDistance, maskDown, QueryTriggerInteraction.Ignore);
+        RaycastHit[] downs = Physics.RaycastAll(new Ray(forwardPoint + Vector3.up * 10f, Vector3.down), clampDistance, maskDown, QueryTriggerInteraction.Ignore);
         System.Array.Sort(downs, (a, b) => a.distance.CompareTo(b.distance));
         for (int i = 0; i < downs.Length; i++)
         {

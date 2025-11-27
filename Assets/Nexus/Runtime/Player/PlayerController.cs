@@ -261,7 +261,8 @@ namespace Nexus
             else
             {
                 float scroll = Input.mouseScrollDelta.y;
-                if (scroll != 0f)
+                // Do not apply camera zoom when holding R (reserved for token rotation)
+                if (scroll != 0f && !Input.GetKey(KeyCode.R))
                 {
                     if (scrollZoomUsesFOV)
                     {
