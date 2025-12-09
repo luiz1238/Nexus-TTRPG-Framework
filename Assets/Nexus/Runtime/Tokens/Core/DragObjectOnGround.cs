@@ -5,9 +5,6 @@ using System.Collections.Generic;
 
 public class DragObjectOnGround : MonoBehaviour
 {
-    [Header("Camadas")]
-    public LayerMask groundLayer = 0; // se não definido, usa DefaultRaycastLayers
-
     [Header("Altura e suavização")]
     public float pivotOffsetToFeet = 1f;
     public float rayStartHeight = 2f;
@@ -68,10 +65,7 @@ public class DragObjectOnGround : MonoBehaviour
 
     private int EffectiveGroundMask()
     {
-        if (groundLayer.value != 0) return groundLayer.value;
-        int m = LayerMask.GetMask("Ground");
-        if (m == 0) return Physics.DefaultRaycastLayers;
-        return m;
+        return LayerMask.GetMask("Ground");
     }
 
     void Start()
@@ -293,6 +287,46 @@ public class DragObjectOnGround : MonoBehaviour
             }
         }
         targetPos.y = newY;
+
+        if (cachedCols != null && cachedCols.Length > 0)
+        {
+            Vector3 tmpPos = transform.position;
+            Quaternion tmpRot = transform.rotation;
+            transform.position = new Vector3(targetPos.x, targetPos.y, targetPos.z);
+            Bounds cb = cachedCols[0].bounds;
+            for (int i = 1; i < cachedCols.Length; i++) cb.Encapsulate(cachedCols[i].bounds);
+            Vector3 half = cb.extents + new Vector3(0.002f, 0.002f, 0.002f);
+            Collider[] ngCols = Physics.OverlapBox(cb.center, half, transform.rotation, ~EffectiveGroundMask(), QueryTriggerInteraction.Ignore);
+            float maxDown = 0f;
+            for (int i = 0; i < ngCols.Length; i++)
+            {
+                var ec = ngCols[i];
+                if (ec == null) continue;
+                if (ec.transform == transform || ec.transform.IsChildOf(transform)) continue;
+                if (ec.isTrigger) continue;
+                for (int c = 0; c < cachedCols.Length; c++)
+                {
+                    var tc = cachedCols[c];
+                    if (tc == null) continue;
+                    if (Physics.ComputePenetration(tc, tc.transform.position, tc.transform.rotation,
+                                                   ec, ec.transform.position, ec.transform.rotation,
+                                                   out Vector3 dir, out float dist))
+                    {
+                        if (dist > 0f)
+                        {
+                            float down = Vector3.Dot(dir.normalized * dist, Vector3.down);
+                            if (down > maxDown) maxDown = down;
+                        }
+                    }
+                }
+            }
+            transform.position = tmpPos;
+            transform.rotation = tmpRot;
+            if (maxDown > 0f)
+            {
+                targetPos.y -= maxDown;
+            }
+        }
 
         // Final safety: lift out of any residual intersections with ground colliders (vertical-only)
         if (cachedCols != null && cachedCols.Length > 0)
