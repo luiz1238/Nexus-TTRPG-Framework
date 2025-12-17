@@ -412,6 +412,23 @@ public class TokenSetup : MonoBehaviour
     {
         currentScale = scale;
         transform.localScale = Vector3.one * scale;
+        if (groundSnap && !externalDragActive)
+        {
+            SnapImmediate();
+            Bounds b;
+            if (boxCollider != null)
+                b = boxCollider.bounds;
+            else if (!TryGetCombinedBounds(out b))
+                b = new Bounds(transform.position, Vector3.zero);
+            supportBaselineY = b.min.y;
+            if (spriteRenderer != null)
+            {
+                float spriteBottomY = spriteRenderer.bounds.min.y;
+                if (spriteBottomY < supportBaselineY) supportBaselineY = spriteBottomY;
+            }
+            supportBaselineInit = true;
+            lastXZPos = transform.position;
+        }
     }
     
     public float GetCurrentScale()
@@ -831,6 +848,11 @@ public class TokenSetup : MonoBehaviour
     public int GetCurrentState()
     {
         return currentState;
+    }
+    
+    public LayerMask GetGroundMask()
+    {
+        return groundMask;
     }
     
     // Debug visualization

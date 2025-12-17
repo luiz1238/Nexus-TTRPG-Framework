@@ -28,6 +28,10 @@ public class DragObjectOnGround : MonoBehaviour
     [Tooltip("Small visual lift above ground to avoid z-fighting and tiny intersections")]
     public float feetLift = 0.01f;
 
+    private Vector3 lastProjectedPoint;
+    private bool hasProjected = false;
+    private Vector3 lastMousePos;
+
     private Vector3 offset;
     private Camera mainCamera;
     private Camera playerCamera;
@@ -65,6 +69,11 @@ public class DragObjectOnGround : MonoBehaviour
 
     private int EffectiveGroundMask()
     {
+        if (tokenSetup != null)
+        {
+            int m = tokenSetup.GetGroundMask();
+            if (m != 0) return m;
+        }
         return LayerMask.GetMask("Ground");
     }
 
@@ -162,6 +171,9 @@ public class DragObjectOnGround : MonoBehaviour
         if (dragPlane.Raycast(ray, out float d))
         {
             offset = transform.position - ray.GetPoint(d);
+            lastMousePos = Input.mousePosition;
+            lastProjectedPoint = ray.GetPoint(d) + offset;
+            hasProjected = true;
         }
         // memoriza diferença de altura inicial
         dragHeightOffset = 0f;
@@ -204,13 +216,28 @@ public class DragObjectOnGround : MonoBehaviour
         float maxD = Mathf.Min(maxRayDistance, 80f);
         if (distance < 0f) distance = 0f;
         float dClamped = Mathf.Min(distance, maxD);
-        Vector3 targetPos = ray.GetPoint(dClamped) + offset;
-        // Limit horizontal speed to avoid overshooting into roofs/ceilings when cursor moves fast or is near camera
-        Vector2 curXZ = new Vector2(transform.position.x, transform.position.z);
-        Vector2 tgtXZ = new Vector2(targetPos.x, targetPos.z);
-        Vector2 newXZ = Vector2.MoveTowards(curXZ, tgtXZ, Mathf.Max(0.01f, maxXZSpeed) * Time.deltaTime);
-        targetPos.x = newXZ.x;
-        targetPos.z = newXZ.y;
+        Vector3 pCurrent = ray.GetPoint(dClamped) + offset;
+
+        Vector3 newXZPos = pCurrent;
+        if (hasProjected)
+        {
+            Ray rayPrev = playerCamera.ScreenPointToRay(lastMousePos);
+            float prevDist;
+            if (!(dragPlaneActive && dragPlane.Raycast(rayPrev, out prevDist)))
+            {
+                Plane planePrev = new Plane(Vector3.up, transform.position);
+                planePrev.Raycast(rayPrev, out prevDist);
+            }
+            float prevClamped = Mathf.Min(prevDist, maxD);
+            Vector3 pPrevSameCam = rayPrev.GetPoint(prevClamped) + offset;
+            Vector3 mouseOnlyDelta = pCurrent - pPrevSameCam;
+            newXZPos = lastProjectedPoint + mouseOnlyDelta;
+        }
+
+        Vector3 targetPos = newXZPos;
+        lastProjectedPoint = newXZPos;
+        lastMousePos = Input.mousePosition;
+        hasProjected = true;
         // Compute current bottom at predicted XZ, then cast straight down to find a support UNDER the token
         Vector3 savedPosXZ = transform.position;
         transform.position = new Vector3(targetPos.x, savedPosXZ.y, targetPos.z);
@@ -259,11 +286,6 @@ public class DragObjectOnGround : MonoBehaviour
             currentBottomY = savedPosXZ.y - pivotOffsetToFeet;
             halfExtNow = new Vector3(0.01f, 0.01f, 0.01f);
         }
-        if (spriteRendererRef != null)
-        {
-            float spriteBottom = spriteRendererRef.bounds.min.y;
-            if (spriteBottom < currentBottomY) currentBottomY = spriteBottom;
-        }
         transform.position = savedPosXZ;
 
         int mask = EffectiveGroundMask();
@@ -271,104 +293,419 @@ public class DragObjectOnGround : MonoBehaviour
         float rayDownDist = Mathf.Max(0.25f, rayStartHeight + searchDown + cbNow.extents.y + 0.5f);
         Vector3 origin = new Vector3(targetPos.x, originY, targetPos.z);
         float allowedUp = Mathf.Max(0.01f, maxStepUpNoBelow);
+        float allowedMaxY = currentBottomY + allowedUp;
         float newY = savedPosXZ.y; // default keep height
-        if (Physics.Raycast(origin, Vector3.down, out RaycastHit hit, rayDownDist, mask, QueryTriggerInteraction.Ignore))
+
+        // Center ray: choose nearest valid ground under center
+        bool centerOK = false;
+        RaycastHit centerHit = new RaycastHit();
+        var centerHits = Physics.RaycastAll(origin, Vector3.down, rayDownDist, mask, QueryTriggerInteraction.Ignore);
+        if (centerHits != null && centerHits.Length > 0)
         {
-            var ht = hit.collider != null ? hit.collider.transform : null;
-            bool selfHit = ht == transform || (ht != null && ht.IsChildOf(transform));
-            if (!selfHit && hit.normal.y >= minGroundNormalY)
+            float best = float.PositiveInfinity;
+            for (int i = 0; i < centerHits.Length; i++)
             {
-                float hpY = hit.point.y;
-                if (hpY <= currentBottomY + allowedUp)
+                var h = centerHits[i];
+                var ht = h.collider != null ? h.collider.transform : null;
+                bool selfHit = ht == transform || (ht != null && ht.IsChildOf(transform));
+                if (selfHit) continue;
+                if (h.normal.y < minGroundNormalY) continue;
+                if (h.distance < best)
                 {
-                    float groundY = hpY + feetLift;
-                    newY = savedPosXZ.y + (groundY - currentBottomY);
+                    best = h.distance;
+                    centerHit = h;
+                    centerOK = true;
                 }
             }
+        }
+
+        // Footprint support: boxcast down to find any support under token extents
+        bool supportOK = false;
+        RaycastHit supportHit = new RaycastHit();
+        var supportHits = Physics.BoxCastAll(origin, halfExtNow, Vector3.down, transform.rotation, rayDownDist, mask, QueryTriggerInteraction.Ignore);
+        if (supportHits != null && supportHits.Length > 0)
+        {
+            float best = float.PositiveInfinity;
+            for (int i = 0; i < supportHits.Length; i++)
+            {
+                var h = supportHits[i];
+                var ht = h.collider != null ? h.collider.transform : null;
+                bool selfHit = ht == transform || (ht != null && ht.IsChildOf(transform));
+                if (selfHit) continue;
+                if (h.normal.y < minGroundNormalY) continue;
+                if (h.distance < best)
+                {
+                    best = h.distance;
+                    supportHit = h;
+                    supportOK = true;
+                }
+            }
+        }
+
+        bool gotGround = false;
+        float chosenY = currentBottomY;
+        if (centerOK)
+        {
+            float cy = centerHit.point.y;
+            if (cy < currentBottomY)
+            {
+                // Step down immediately when center falls below current bottom (edge/cliff)
+                chosenY = cy;
+            }
+            else
+            {
+                float sy = supportOK ? supportHit.point.y : cy;
+                cy = Mathf.Min(cy, allowedMaxY);
+                sy = Mathf.Min(sy, allowedMaxY);
+                chosenY = Mathf.Max(cy, sy);
+            }
+            gotGround = true;
+        }
+        else if (supportOK)
+        {
+            // No center hit; prefer highest support under footprint, but allow large step-down via corners
+            float px = Mathf.Max(0f, cbNow.extents.x - 0.02f);
+            float pz = Mathf.Max(0f, cbNow.extents.z - 0.02f);
+            Vector3[] corners = new Vector3[4]
+            {
+                new Vector3(origin.x - px, origin.y, origin.z - pz),
+                new Vector3(origin.x - px, origin.y, origin.z + pz),
+                new Vector3(origin.x + px, origin.y, origin.z - pz),
+                new Vector3(origin.x + px, origin.y, origin.z + pz),
+            };
+            bool anyCorner = false;
+            float minCornerY = float.PositiveInfinity;
+            for (int i = 0; i < 4; i++)
+            {
+                if (Physics.Raycast(corners[i], Vector3.down, out RaycastHit ch, rayDownDist, mask, QueryTriggerInteraction.Ignore))
+                {
+                    var ht = ch.collider != null ? ch.collider.transform : null;
+                    bool selfHit = ht == transform || (ht != null && ht.IsChildOf(transform));
+                    if (selfHit) continue;
+                    if (ch.normal.y < minGroundNormalY) continue;
+                    anyCorner = true;
+                    if (ch.point.y < minCornerY) minCornerY = ch.point.y;
+                }
+            }
+            if (anyCorner && (currentBottomY - minCornerY) >= 0.35f)
+            {
+                chosenY = minCornerY;
+            }
+            else
+            {
+                float sy = supportHit.point.y;
+                float farY = sy;
+                var farHits = Physics.RaycastAll(origin, Vector3.down, maxRayDistance, mask, QueryTriggerInteraction.Ignore);
+                if (farHits != null && farHits.Length > 0)
+                {
+                    float best = float.PositiveInfinity;
+                    for (int i = 0; i < farHits.Length; i++)
+                    {
+                        var h = farHits[i];
+                        var ht = h.collider != null ? h.collider.transform : null;
+                        bool selfHit = ht == transform || (ht != null && ht.IsChildOf(transform));
+                        if (selfHit) continue;
+                        if (h.normal.y < minGroundNormalY) continue;
+                        if (h.distance < best)
+                        {
+                            best = h.distance;
+                            farY = h.point.y;
+                        }
+                    }
+                }
+                if (farY < sy - 0.05f)
+                {
+                    chosenY = farY;
+                }
+                else
+                {
+                    sy = Mathf.Min(sy, allowedMaxY);
+                    chosenY = sy;
+                }
+            }
+            gotGround = true;
+        }
+        else
+        {
+            // Nothing within short window; try an extended downward search to catch very high cliffs
+            float farDist = maxRayDistance;
+            var farHits = Physics.RaycastAll(origin, Vector3.down, farDist, mask, QueryTriggerInteraction.Ignore);
+            if (farHits != null && farHits.Length > 0)
+            {
+                float best = float.PositiveInfinity;
+                for (int i = 0; i < farHits.Length; i++)
+                {
+                    var h = farHits[i];
+                    var ht = h.collider != null ? h.collider.transform : null;
+                    bool selfHit = ht == transform || (ht != null && ht.IsChildOf(transform));
+                    if (selfHit) continue;
+                    if (h.normal.y < minGroundNormalY) continue;
+                    if (h.distance < best)
+                    {
+                        best = h.distance;
+                        centerHit = h;
+                        centerOK = true;
+                    }
+                }
+                if (centerOK)
+                {
+                    chosenY = centerHit.point.y;
+                    gotGround = true;
+                }
+            }
+        }
+
+        if (gotGround)
+        {
+            float groundY = chosenY + feetLift;
+            newY = savedPosXZ.y + (groundY - currentBottomY);
+            lastGroundY = chosenY;
+            hasGroundY = true;
+            framesSinceSeenLastGround = 0;
+            if (centerOK) lastGroundCollider = centerHit.collider; else if (supportOK) lastGroundCollider = supportHit.collider;
+        }
+        else
+        {
+            // Keep height; note we temporarily lost ground
+            framesSinceSeenLastGround++;
+            hasGroundY = false;
         }
         targetPos.y = newY;
 
         if (cachedCols != null && cachedCols.Length > 0)
         {
-            Vector3 tmpPos = transform.position;
-            Quaternion tmpRot = transform.rotation;
-            transform.position = new Vector3(targetPos.x, targetPos.y, targetPos.z);
-            Bounds cb = cachedCols[0].bounds;
-            for (int i = 1; i < cachedCols.Length; i++) cb.Encapsulate(cachedCols[i].bounds);
-            Vector3 half = cb.extents + new Vector3(0.002f, 0.002f, 0.002f);
-            Collider[] ngCols = Physics.OverlapBox(cb.center, half, transform.rotation, ~EffectiveGroundMask(), QueryTriggerInteraction.Ignore);
-            float maxDown = 0f;
-            for (int i = 0; i < ngCols.Length; i++)
+            for (int iter = 0; iter < 2; iter++)
             {
-                var ec = ngCols[i];
-                if (ec == null) continue;
-                if (ec.transform == transform || ec.transform.IsChildOf(transform)) continue;
-                if (ec.isTrigger) continue;
-                for (int c = 0; c < cachedCols.Length; c++)
+                Vector3 tmpPos = transform.position;
+                Quaternion tmpRot = transform.rotation;
+                transform.position = new Vector3(targetPos.x, targetPos.y, targetPos.z);
+                Bounds cb = cachedCols[0].bounds;
+                for (int i = 1; i < cachedCols.Length; i++) cb.Encapsulate(cachedCols[i].bounds);
+                Vector3 half = cb.extents + new Vector3(0.002f, 0.002f, 0.002f);
+                Collider[] others = Physics.OverlapBox(cb.center, half, transform.rotation, ~0, QueryTriggerInteraction.Ignore);
+                Vector3 totalHoriz = Vector3.zero;
+                for (int i = 0; i < others.Length; i++)
                 {
-                    var tc = cachedCols[c];
-                    if (tc == null) continue;
-                    if (Physics.ComputePenetration(tc, tc.transform.position, tc.transform.rotation,
-                                                   ec, ec.transform.position, ec.transform.rotation,
-                                                   out Vector3 dir, out float dist))
+                    var ec = others[i];
+                    if (ec == null) continue;
+                    if (ec.transform == transform || ec.transform.IsChildOf(transform)) continue;
+                    if (ec.isTrigger) continue;
+                    for (int c = 0; c < cachedCols.Length; c++)
                     {
-                        if (dist > 0f)
+                        var tc = cachedCols[c];
+                        if (tc == null) continue;
+                        if (Physics.ComputePenetration(tc, tc.transform.position, tc.transform.rotation,
+                                                       ec, ec.transform.position, ec.transform.rotation,
+                                                       out Vector3 dir, out float dist))
                         {
-                            float down = Vector3.Dot(dir.normalized * dist, Vector3.down);
-                            if (down > maxDown) maxDown = down;
+                            if (dist > 0f)
+                            {
+                                Vector3 sep = dir.normalized * dist;
+                                Vector3 horiz = Vector3.ProjectOnPlane(sep, Vector3.up);
+                                if (horiz.sqrMagnitude > 0.000001f) totalHoriz += horiz;
+                            }
                         }
                     }
                 }
-            }
-            transform.position = tmpPos;
-            transform.rotation = tmpRot;
-            if (maxDown > 0f)
-            {
-                targetPos.y -= maxDown;
+                transform.position = tmpPos;
+                transform.rotation = tmpRot;
+                if (totalHoriz.sqrMagnitude > 0.000001f) targetPos += totalHoriz;
+                else break;
             }
         }
 
-        // Final safety: lift out of any residual intersections with ground colliders (vertical-only)
         if (cachedCols != null && cachedCols.Length > 0)
         {
-            Vector3 savedPos = transform.position;
-            Quaternion savedRot = transform.rotation;
-            // Predict at target position to compute penetration
-            transform.position = new Vector3(targetPos.x, targetPos.y, targetPos.z);
-            // Compute combined bounds at predicted position
-            Bounds cb = cachedCols[0].bounds;
-            for (int i = 1; i < cachedCols.Length; i++) cb.Encapsulate(cachedCols[i].bounds);
-            Vector3 half = cb.extents + new Vector3(0.002f, 0.002f, 0.002f);
-            Collider[] envCols = Physics.OverlapBox(cb.center, half, transform.rotation, EffectiveGroundMask(), QueryTriggerInteraction.Ignore);
-            float maxLift = 0f;
-            for (int i = 0; i < envCols.Length; i++)
+            float yDelta = targetPos.y - savedPosXZ.y;
+            float originY2 = cbNow.max.y + yDelta + Mathf.Max(0.05f, rayStartHeight);
+            Vector3 origin2 = new Vector3(targetPos.x, originY2, targetPos.z);
+            float currentBottomY2 = currentBottomY + yDelta;
+            float allowedMaxY2 = currentBottomY2 + allowedUp;
+
+            bool centerOK2 = false;
+            RaycastHit centerHit2 = new RaycastHit();
+            var centerHits2 = Physics.RaycastAll(origin2, Vector3.down, maxRayDistance, mask, QueryTriggerInteraction.Ignore);
+            if (centerHits2 != null && centerHits2.Length > 0)
             {
-                var ec = envCols[i];
-                if (ec == null) continue;
-                if (ec.transform == transform || ec.transform.IsChildOf(transform)) continue;
-                if (ec.isTrigger) continue;
-                for (int c = 0; c < cachedCols.Length; c++)
+                float best2 = float.PositiveInfinity;
+                for (int i = 0; i < centerHits2.Length; i++)
                 {
-                    var tc = cachedCols[c];
-                    if (tc == null) continue;
-                    if (Physics.ComputePenetration(tc, tc.transform.position, tc.transform.rotation,
-                                                   ec, ec.transform.position, ec.transform.rotation,
-                                                   out Vector3 dir, out float dist))
+                    var h = centerHits2[i];
+                    var ht = h.collider != null ? h.collider.transform : null;
+                    bool selfHit = ht == transform || (ht != null && ht.IsChildOf(transform));
+                    if (selfHit) continue;
+                    if (h.normal.y < minGroundNormalY) continue;
+                    if (h.distance < best2)
                     {
-                        if (dist > 0f)
-                        {
-                            float lift = Vector3.Dot(dir.normalized * dist, Vector3.up);
-                            if (lift > maxLift) maxLift = lift;
-                        }
+                        best2 = h.distance;
+                        centerHit2 = h;
+                        centerOK2 = true;
                     }
                 }
             }
-            // restore
-            transform.position = savedPos;
-            transform.rotation = savedRot;
-            if (maxLift > 0f)
+
+            bool supportOK2 = false;
+            RaycastHit supportHit2 = new RaycastHit();
+            var supportHits2 = Physics.BoxCastAll(origin2, halfExtNow, Vector3.down, transform.rotation, maxRayDistance, mask, QueryTriggerInteraction.Ignore);
+            if (supportHits2 != null && supportHits2.Length > 0)
             {
-                targetPos.y += maxLift;
+                float best2 = float.PositiveInfinity;
+                for (int i = 0; i < supportHits2.Length; i++)
+                {
+                    var h = supportHits2[i];
+                    var ht = h.collider != null ? h.collider.transform : null;
+                    bool selfHit = ht == transform || (ht != null && ht.IsChildOf(transform));
+                    if (selfHit) continue;
+                    if (h.normal.y < minGroundNormalY) continue;
+                    if (h.distance < best2)
+                    {
+                        best2 = h.distance;
+                        supportHit2 = h;
+                        supportOK2 = true;
+                    }
+                }
+            }
+
+            bool gotGround2 = false;
+            float chosenY2 = currentBottomY2;
+            if (centerOK2)
+            {
+                float cy2 = centerHit2.point.y;
+                if (cy2 < currentBottomY2)
+                {
+                    chosenY2 = cy2;
+                }
+                else
+                {
+                    float sy2 = supportOK2 ? supportHit2.point.y : cy2;
+                    cy2 = Mathf.Min(cy2, allowedMaxY2);
+                    sy2 = Mathf.Min(sy2, allowedMaxY2);
+                    chosenY2 = Mathf.Max(cy2, sy2);
+                }
+                gotGround2 = true;
+            }
+            else if (supportOK2)
+            {
+                float px2 = Mathf.Max(0f, cbNow.extents.x - 0.02f);
+                float pz2 = Mathf.Max(0f, cbNow.extents.z - 0.02f);
+                Vector3[] corners2 = new Vector3[4]
+                {
+                    new Vector3(origin2.x - px2, origin2.y, origin2.z - pz2),
+                    new Vector3(origin2.x - px2, origin2.y, origin2.z + pz2),
+                    new Vector3(origin2.x + px2, origin2.y, origin2.z - pz2),
+                    new Vector3(origin2.x + px2, origin2.y, origin2.z + pz2),
+                };
+                bool anyCorner2 = false;
+                float minCornerY2 = float.PositiveInfinity;
+                for (int i = 0; i < 4; i++)
+                {
+                    if (Physics.Raycast(corners2[i], Vector3.down, out RaycastHit ch2, maxRayDistance, mask, QueryTriggerInteraction.Ignore))
+                    {
+                        var ht = ch2.collider != null ? ch2.collider.transform : null;
+                        bool selfHit = ht == transform || (ht != null && ht.IsChildOf(transform));
+                        if (selfHit) continue;
+                        if (ch2.normal.y < minGroundNormalY) continue;
+                        anyCorner2 = true;
+                        if (ch2.point.y < minCornerY2) minCornerY2 = ch2.point.y;
+                    }
+                }
+                if (anyCorner2 && (currentBottomY2 - minCornerY2) >= 0.35f)
+                {
+                    chosenY2 = minCornerY2;
+                }
+                else
+                {
+                    float sy2 = supportHit2.point.y;
+                    sy2 = Mathf.Min(sy2, allowedMaxY2);
+                    chosenY2 = sy2;
+                }
+                gotGround2 = true;
+            }
+            else
+            {
+                var farHits2 = Physics.RaycastAll(origin2, Vector3.down, maxRayDistance, mask, QueryTriggerInteraction.Ignore);
+                if (farHits2 != null && farHits2.Length > 0)
+                {
+                    float best2 = float.PositiveInfinity;
+                    for (int i = 0; i < farHits2.Length; i++)
+                    {
+                        var h = farHits2[i];
+                        var ht = h.collider != null ? h.collider.transform : null;
+                        bool selfHit = ht == transform || (ht != null && ht.IsChildOf(transform));
+                        if (selfHit) continue;
+                        if (h.normal.y < minGroundNormalY) continue;
+                        if (h.distance < best2)
+                        {
+                            best2 = h.distance;
+                            centerHit2 = h;
+                            centerOK2 = true;
+                        }
+                    }
+                    if (centerOK2)
+                    {
+                        chosenY2 = centerHit2.point.y;
+                        gotGround2 = true;
+                    }
+                }
+            }
+
+            if (gotGround2)
+            {
+                float groundY2 = chosenY2 + feetLift;
+                float newY2 = savedPosXZ.y + yDelta + (groundY2 - currentBottomY2);
+                targetPos.y = newY2;
+                lastGroundY = chosenY2;
+                hasGroundY = true;
+                framesSinceSeenLastGround = 0;
+                if (centerOK2) lastGroundCollider = centerHit2.collider; else if (supportOK2) lastGroundCollider = supportHit2.collider;
+            }
+        }
+
+        // Final safety: iteratively lift out of any residual intersections with ground colliders (vertical-only)
+        if (cachedCols != null && cachedCols.Length > 0)
+        {
+            for (int iter = 0; iter < 5; iter++)
+            {
+                Vector3 savedPos = transform.position;
+                Quaternion savedRot = transform.rotation;
+                transform.position = new Vector3(targetPos.x, targetPos.y, targetPos.z);
+                Bounds cb = cachedCols[0].bounds;
+                for (int i = 1; i < cachedCols.Length; i++) cb.Encapsulate(cachedCols[i].bounds);
+                Vector3 half = cb.extents + new Vector3(0.002f, 0.002f, 0.002f);
+                Collider[] envCols = Physics.OverlapBox(cb.center, half, transform.rotation, EffectiveGroundMask(), QueryTriggerInteraction.Ignore);
+                float maxLift = 0f;
+                for (int i = 0; i < envCols.Length; i++)
+                {
+                    var ec = envCols[i];
+                    if (ec == null) continue;
+                    if (ec.transform == transform || ec.transform.IsChildOf(transform)) continue;
+                    if (ec.isTrigger) continue;
+                    for (int c = 0; c < cachedCols.Length; c++)
+                    {
+                        var tc = cachedCols[c];
+                        if (tc == null) continue;
+                        if (Physics.ComputePenetration(tc, tc.transform.position, tc.transform.rotation,
+                                                       ec, ec.transform.position, ec.transform.rotation,
+                                                       out Vector3 dir, out float dist))
+                        {
+                            if (dist > 0f)
+                            {
+                                float lift = Vector3.Dot(dir.normalized * dist, Vector3.up);
+                                if (lift > maxLift) maxLift = lift;
+                            }
+                        }
+                    }
+                }
+                transform.position = savedPos;
+                transform.rotation = savedRot;
+                if (maxLift > 0.0005f)
+                {
+                    targetPos.y += maxLift;
+                }
+                else
+                {
+                    break;
+                }
             }
         }
 
@@ -418,6 +755,7 @@ public class DragObjectOnGround : MonoBehaviour
 
         // reset height offset
         dragHeightOffset = 0f;
+        hasProjected = false;
         if (tokenSetup != null) tokenSetup.ForceSnapImmediate();
     }
 }
