@@ -52,23 +52,38 @@ public static class NexusUserTools
     {
         // Try to copy user-provided demo assets first
         bool copiedUserDemo = false;
-        string srcToken = "Assets/Nexus/Resources/Tokens/Personagem/Jae.prefab";
-        string destToken = UserRoot + "/Resources/Tokens/Personagem/Jae.prefab";
-        if (AssetDatabase.LoadAssetAtPath<GameObject>(srcToken) != null)
+        string srcToken2 = "Assets/Nexus/Resources/Tokens/Personagem/2SidedToken.prefab";
+        string destToken2 = UserRoot + "/Resources/Tokens/Personagem/2SidedToken.prefab";
+        if (AssetDatabase.LoadAssetAtPath<GameObject>(srcToken2) != null)
         {
-            CreateFoldersForPath(Path.GetDirectoryName(destToken).Replace("\\", "/"));
-            if (!File.Exists(destToken))
+            CreateFoldersForPath(Path.GetDirectoryName(destToken2).Replace("\\", "/"));
+            if (!File.Exists(destToken2))
             {
-                if (AssetDatabase.CopyAsset(srcToken, destToken)) copiedUserDemo = true;
+                if (AssetDatabase.CopyAsset(srcToken2, destToken2)) copiedUserDemo = true;
             }
             else
             {
-                copiedUserDemo = true; // already present counts as seeded
+                copiedUserDemo = true;
             }
         }
 
-        string srcScene = "Assets/Nexus/Resources/Scenes/SubScenes/Cabin Demo.unity";
-        string destScene = UserRoot + "/Scenes/Subscenes/Cabin Demo.unity";
+        string srcToken4 = "Assets/Nexus/Resources/Tokens/Personagem/4SidedToken.prefab";
+        string destToken4 = UserRoot + "/Resources/Tokens/Personagem/4SidedToken.prefab";
+        if (AssetDatabase.LoadAssetAtPath<GameObject>(srcToken4) != null)
+        {
+            CreateFoldersForPath(Path.GetDirectoryName(destToken4).Replace("\\", "/"));
+            if (!File.Exists(destToken4))
+            {
+                if (AssetDatabase.CopyAsset(srcToken4, destToken4)) copiedUserDemo = true;
+            }
+            else
+            {
+                copiedUserDemo = true;
+            }
+        }
+
+        string srcScene = "Assets/Nexus/Resources/Scenes/SubScenes/Demo Playground.unity";
+        string destScene = UserRoot + "/Scenes/Subscenes/Demo Playground.unity";
         if (AssetDatabase.LoadAssetAtPath<SceneAsset>(srcScene) != null)
         {
             CreateFoldersForPath(Path.GetDirectoryName(destScene).Replace("\\", "/"));
@@ -86,40 +101,17 @@ public static class NexusUserTools
             // Register scene regardless of copy success using dest if exists, else source
             string pathToUse = File.Exists(destScene) ? destScene : srcScene;
             AddSceneToBuildSettings(pathToUse);
-            EnsureSceneConfigHasDemo("Cabin Demo");
-            // Copy and assign demo thumbnail
-            string srcThumb = "Assets/Nexus/Resources/Scenes/SubScenes/CabinDemoThumbnail.png";
-            string destThumb = UserRoot + "/Scenes/Subscenes/CabinDemoThumbnail.png";
-            if (AssetDatabase.LoadAssetAtPath<Texture2D>(srcThumb) != null)
-            {
-                if (!File.Exists(destThumb))
-                {
-                    CreateFoldersForPath(Path.GetDirectoryName(destThumb).Replace("\\", "/"));
-                    AssetDatabase.CopyAsset(srcThumb, destThumb);
-                }
-                AssetDatabase.ImportAsset(destThumb);
-                var ti = AssetImporter.GetAtPath(destThumb) as TextureImporter;
-                if (ti != null)
-                {
-                    if (ti.textureType != TextureImporterType.Sprite)
-                    {
-                        ti.textureType = TextureImporterType.Sprite;
-                        ti.spritePixelsPerUnit = 100;
-                        ti.SaveAndReimport();
-                    }
-                }
-                AssignThumbnailToConfig("Cabin Demo", destThumb);
-            }
+            EnsureSceneConfigHasDemo("Demo Playground");
             AssignUserSceneConfigToMainScene();
         }
 
         if (copiedUserDemo)
         {
             AssetDatabase.Refresh();
-            Debug.Log("Demo content ensured from user assets: Jae prefab and Cabin Demo scene");
+            Debug.Log("Demo content ensured from user assets: 2SidedToken and 4SidedToken prefabs, and Demo Playground scene");
             return;
         }
-        Debug.LogWarning("User demo assets not found; no demo content was created. Expected Jae.prefab and Cabin Demo.unity.");
+        Debug.LogWarning("User demo assets not found; no demo content was created. Expected 2SidedToken.prefab, 4SidedToken.prefab and Demo Playground.unity.");
     }
 
     private static void MoveSelectionTo(string destFolder)

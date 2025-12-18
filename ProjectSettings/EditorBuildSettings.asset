@@ -9,9 +9,9 @@ EditorBuildSettings:
     path: Assets/Nexus/Resources/Scenes/MainScene.unity
     guid: 2c9b6153528b23a35bb0a15ba52b6f4e
   - enabled: 1
-    path: Assets/Nexus/Resources/Scenes/SubScenes/Cabin Demo.unity
-    guid: d889a95d703ef68e0803600392e907b0
+    path: Assets/Nexus/Resources/Scenes/SubScenes/Nexus-Playground.unity
+    guid: abf41a033bfed3b809dd4d268b58e659
   - enabled: 1
-    path: Assets/NexusUser/Abandoned_Psychiatric_Hospitals/Scenes/Demo.unity
-    guid: 1bafc89e0c2524a4996d0dd284a28aee
+    path: Assets/NexusUser/Scenes/Subscenes/Demo Playground.unity
+    guid: 71dce5cd54d754d24aed859d3ba90abf
   m_configObjects: {}
