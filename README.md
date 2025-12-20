@@ -1,6 +1,8 @@
 <div align="center">
 
-# Nexus TTRPG Framework
+<img width="666" height="400" alt="tabletop_logo_banner" src="https://github.com/user-attachments/assets/2b5b7282-3ac9-424f-8a05-2f228f21f45b" />
+
+# Nexus Tabletop
 
 Framework modular para mesas virtuais (VTT) no Unity. Crie cenas, tokens e experiências de RPG de mesa digitais com foco em extensibilidade e rapidez.
 
