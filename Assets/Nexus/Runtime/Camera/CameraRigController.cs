@@ -116,7 +116,7 @@ public class CameraRigController : MonoBehaviour
             targetFov = Mathf.LerpUnclamped(overrideStartFOV, overrideTargetFOV, k);
             if (overrideTimer >= overrideDuration) overrideTimer = 0f;
         }
-        else if (dynamicFOV)
+        else if (dynamicFOV && !TokenDraggable.IsAnyDragging)
         {
             float t = Mathf.Clamp01(currentSpeed / speedForMaxFOV);
             targetFov = Mathf.Lerp(idleFOV, maxFOV, t);

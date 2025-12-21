@@ -126,17 +126,14 @@ namespace Nexus.Networking
                 rb.WakeUp();
             }
 
-            // Ensure immediate snap from token logic, if present
-            var ts = obj.GetComponent<TokenSetup>();
-            if (ts != null)
+            // Ensure simple drag component exists for network-spawned tokens (new logic)
+            if (obj.GetComponent<TokenSetup>() != null)
             {
-                ts.ForceSnapImmediate();
-            }
-
-            // Ensure simple drag component exists for network-spawned tokens
-            if (obj.GetComponent<DragObjectOnGround>() == null && obj.GetComponent<TokenSetup>() != null)
-            {
-                obj.AddComponent<DragObjectOnGround>();
+                var dragger = obj.GetComponent<TokenDraggable>();
+                if (dragger == null)
+                {
+                    dragger = obj.AddComponent<TokenDraggable>();
+                }
             }
 
             // Ensure colliders are solid (not triggers)

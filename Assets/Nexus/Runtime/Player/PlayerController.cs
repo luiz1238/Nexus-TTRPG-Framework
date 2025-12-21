@@ -251,7 +251,7 @@ namespace Nexus
             if (Input.GetKey(KeyCode.LeftShift))
             {
                 float scroll = Input.mouseScrollDelta.y;
-                if (scroll != 0f)
+                if (scroll != 0f && !TokenDraggable.IsAnyDragging)
                 {
                     currentSpeed += scroll * scrollStep;
                     currentSpeed = Mathf.Clamp(currentSpeed, minSpeed, maxSpeed);
@@ -262,7 +262,7 @@ namespace Nexus
             {
                 float scroll = Input.mouseScrollDelta.y;
                 // Do not apply camera zoom when holding R (reserved for token rotation)
-                if (scroll != 0f && !Input.GetKey(KeyCode.R))
+                if (scroll != 0f && !Input.GetKey(KeyCode.R) && !TokenDraggable.IsAnyDragging)
                 {
                     if (scrollZoomUsesFOV)
                     {

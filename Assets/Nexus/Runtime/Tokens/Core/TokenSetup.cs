@@ -6,11 +6,7 @@ public class TokenSetup : MonoBehaviour
 {
     [Header("Simple Physics Mode")]
     [SerializeField] private bool simplePhysicsMode = false;
-    [SerializeField] private float simpleStabilizeSeconds = 1.0f;
-    [Header("Physics Settings")]
-    [SerializeField] private float mass = 1f;
-    [SerializeField] private float drag = 1f;
-    [SerializeField] private float angularDrag = 0.5f;
+    
     
     [Header("Scale Settings")]
     [SerializeField] private float minScale = 0.10f;
@@ -26,29 +22,14 @@ public class TokenSetup : MonoBehaviour
     [SerializeField] private Sprite directionalFrontSprite;
     [SerializeField] private Sprite directionalBackSprite;
     
-    [Header("Proximity Squash Settings")]
-    [SerializeField] private bool squashNearCamera = true;
-    [SerializeField] private float squashRange = 0.4f;
-    [SerializeField] private float squashNearOffset = 0.05f;
-    [SerializeField] private float minYScaleAtMaxSquash = 0.2f;
-    [SerializeField] private float maxXScaleAtMaxSquash = 1.4f;
-    [SerializeField] private float squashLerpSpeed = 10f;
+    // Proximity Squash (hardcoded)
+    private const bool SQUASH_NEAR_CAMERA = true;
+    private const float SQUASH_RANGE = 0.4f;
+    private const float SQUASH_NEAR_OFFSET = 0.05f;
+    private const float MIN_Y_SCALE_AT_MAX_SQUASH = 0.2f;
+    private const float MAX_X_SCALE_AT_MAX_SQUASH = 1.4f;
+    private const float SQUASH_LERP_SPEED = 10f;
     
-    [Header("Ground Snapping")]
-    [SerializeField] private bool groundSnap = true;
-    [SerializeField] private LayerMask groundMask = ~0;
-    [SerializeField] private float snapRayHeight = 2.0f;
-    [SerializeField] private float snapMaxDistance = 20f;
-    [SerializeField] private float snapOffsetY = 0.0f;
-    [SerializeField] private float minGroundNormalY = 0.4f;
-    [SerializeField] private float snapLerpSpeed = 20f;
-    [SerializeField] private float snapVelocityThreshold = 0.05f;
-    [SerializeField] private float snapFootInset = 0.05f;
-    [SerializeField] private bool snapOnStart = true;
-    private enum SnapSampleMode { CenterPrefer, Median, Highest }
-    [SerializeField] private SnapSampleMode snapMode = SnapSampleMode.CenterPrefer;
-    [SerializeField] private float snapStepUpMax = 0.35f;
-    [SerializeField] private float stepDownMinDrop = 0.35f;
     
     [Header("Token States")]
     [SerializeField] private Sprite defaultSprite;
@@ -67,13 +48,16 @@ public class TokenSetup : MonoBehaviour
     private Vector3 spriteBaseScale = Vector3.one;
     private bool simpleGrounded = false;
     private float simpleClampEndTime = -1f;
-    private Vector3 lastSnapPos;
-    private float lastSnapTime;
-    private bool snapInit;
-    public bool externalDragActive = false;
-    private float supportBaselineY;
-    private bool supportBaselineInit;
-    private Vector3 lastXZPos;
+    
+    [SerializeField] private bool lockYawTo4Angles = false;
+    private Vector3 lastSpriteEvalPos;
+    private bool lastFlipX = false;
+    private bool lastWasBack = false;
+    private Vector3 fourWayForward = Vector3.forward;
+    private Vector3 fourWayRight = Vector3.right;
+    private bool fourWayBasisInit = false;
+    private int lastMoveAxis = 0; // 0 none, 1 forward/back, 2 right/left
+    private const float moveAxisHysteresis = 0.15f;
     
     // State tracking
     private int currentState = 1;
@@ -97,7 +81,7 @@ public class TokenSetup : MonoBehaviour
         {
             EnforceSimplePhysics();
             simpleGrounded = false;
-            simpleClampEndTime = Time.time + simpleStabilizeSeconds;
+            simpleClampEndTime = Time.time + 1.0f;
         }
     }
 
@@ -127,20 +111,22 @@ public class TokenSetup : MonoBehaviour
         ApplyState(currentState);
         ApplyScale(currentScale);
         if (spriteTransform != null) { spriteBaseScale = spriteTransform.localScale; }
-        if (groundSnap && snapOnStart) SnapImmediate();
-        Bounds initBounds;
-        if (boxCollider != null)
-            initBounds = boxCollider.bounds;
-        else if (!TryGetCombinedBounds(out initBounds))
-            initBounds = new Bounds(transform.position, Vector3.zero);
-        supportBaselineY = initBounds.min.y;
+        lastSpriteEvalPos = transform.position;
         if (spriteRenderer != null)
         {
-            float spriteBottomY = spriteRenderer.bounds.min.y;
-            if (spriteBottomY < supportBaselineY) supportBaselineY = spriteBottomY;
+            lastFlipX = spriteRenderer.flipX;
         }
-        supportBaselineInit = true;
-        lastXZPos = transform.position;
+        // Initialize 4-way basis using camera direction at start for continuity
+        if (mainCamera != null)
+        {
+            Vector3 toCam = mainCamera.transform.position - transform.position; toCam.y = 0f;
+            if (toCam.sqrMagnitude > 0.000001f)
+            {
+                fourWayForward = toCam.normalized;
+                fourWayRight = Vector3.Cross(Vector3.up, fourWayForward).normalized;
+                fourWayBasisInit = true;
+            }
+        }
     }
     
     private void Update()
@@ -214,7 +200,6 @@ public class TokenSetup : MonoBehaviour
                 DecreaseScale();
             }
         }
-        ResolveUpwardPenetration();
     }
     
     private void LateUpdate()
@@ -233,32 +218,154 @@ public class TokenSetup : MonoBehaviour
         }
         if (directional4WayBillboard && spriteRenderer != null && mainCamera != null)
         {
-            Vector3 toCam = mainCamera.transform.position - transform.position;
-            toCam.y = 0f;
-            if (toCam.sqrMagnitude > 0.001f)
+            Vector3 move = transform.position - lastSpriteEvalPos;
+            move.y = 0f;
+            bool moved = move.sqrMagnitude > 0.000001f;
+
+            Sprite target = spriteRenderer.sprite;
+            bool flipX = false;
+
+            if (moved)
             {
-                Vector3 dir = toCam.normalized;
-                bool front = Vector3.Dot(transform.forward, dir) >= 0f;
-                bool right = Vector3.Dot(transform.right, dir) > 0f;
-                Sprite target = front
-                    ? (directionalFrontSprite != null ? directionalFrontSprite : (defaultSprite != null ? defaultSprite : spriteRenderer.sprite))
-                    : (directionalBackSprite != null ? directionalBackSprite : (directionalFrontSprite != null ? directionalFrontSprite : (defaultSprite != null ? defaultSprite : spriteRenderer.sprite)));
-                if (spriteRenderer.sprite != target) spriteRenderer.sprite = target;
-                spriteRenderer.flipX = !right;
+                // Movement-based: compare move to camera axes
+                Vector3 camFwd = mainCamera.transform.forward; camFwd.y = 0f; camFwd.Normalize();
+                Vector3 camRight = mainCamera.transform.right;  camRight.y = 0f;  camRight.Normalize();
+                Vector3 moveDir = move.normalized;
+                float dpFwd = Vector3.Dot(moveDir, camFwd);
+                float dpRight = Vector3.Dot(moveDir, camRight);
+                float af = Mathf.Abs(dpFwd);
+                float ar = Mathf.Abs(dpRight);
+                float diff = af - ar;
+                bool useFwdBack;
+                float forwardDeadzone = 0.25f;
+                if (Mathf.Abs(dpFwd) < forwardDeadzone)
+                {
+                    useFwdBack = false;
+                }
+                else
+                {
+                    if (lastMoveAxis == 0)
+                        useFwdBack = af >= ar;
+                    else if (lastMoveAxis == 1)
+                        useFwdBack = diff >= -moveAxisHysteresis;
+                    else
+                        useFwdBack = diff > moveAxisHysteresis;
+                }
+                if (useFwdBack)
+                {
+                    if (dpFwd < 0f)
+                    {
+                        target = directionalFrontSprite != null ? directionalFrontSprite : (defaultSprite != null ? defaultSprite : spriteRenderer.sprite);
+                        flipX = lastFlipX; // preserve lateral flip on forward/back movement
+                        lastWasBack = false;
+                        // Update facing basis to camera so orbit logic starts from this sprite
+                        Vector3 toCam = mainCamera.transform.position - transform.position; toCam.y = 0f;
+                        if (toCam.sqrMagnitude > 0.000001f)
+                        {
+                            fourWayForward = toCam.normalized; // front faces camera
+                            fourWayRight = Vector3.Cross(Vector3.up, fourWayForward).normalized;
+                            fourWayBasisInit = true;
+                        }
+                    }
+                    else
+                    {
+                        target = directionalBackSprite != null ? directionalBackSprite : (directionalFrontSprite != null ? directionalFrontSprite : (defaultSprite != null ? defaultSprite : spriteRenderer.sprite));
+                        flipX = lastFlipX; // preserve lateral flip on forward/back movement
+                        lastWasBack = true;
+                        Vector3 toCam = mainCamera.transform.position - transform.position; toCam.y = 0f;
+                        if (toCam.sqrMagnitude > 0.000001f)
+                        {
+                            fourWayForward = -toCam.normalized; // back faces away from camera
+                            fourWayRight = Vector3.Cross(Vector3.up, fourWayForward).normalized;
+                            fourWayBasisInit = true;
+                        }
+                    }
+                    lastMoveAxis = 1;
+                }
+                else
+                {
+                    Sprite sideBase;
+                    if (lastWasBack)
+                        sideBase = directionalBackSprite != null ? directionalBackSprite : (directionalFrontSprite != null ? directionalFrontSprite : (defaultSprite != null ? defaultSprite : spriteRenderer.sprite));
+                    else
+                        sideBase = directionalFrontSprite != null ? directionalFrontSprite : (defaultSprite != null ? defaultSprite : spriteRenderer.sprite);
+
+                    if (dpRight > 0f)
+                    {
+                        target = sideBase;
+                        if (!lastWasBack)
+                            flipX = false;
+                        else
+                            flipX = true;
+                    }
+                    else
+                    {
+                        target = sideBase;
+                        if (!lastWasBack)
+                            flipX = true;
+                        else
+                            flipX = false;
+                    }
+                    lastFlipX = flipX;
+                    lastMoveAxis = 2;
+                }
+            }
+            else
+            {
+                // Camera orbit-based: compare camera position relative to last movement-facing basis
+                Vector3 toCam = mainCamera.transform.position - transform.position; toCam.y = 0f;
+                if (toCam.sqrMagnitude > 0.000001f)
+                {
+                    Vector3 dir = toCam.normalized;
+                    if (!fourWayBasisInit)
+                    {
+                        fourWayForward = dir; // default to camera-facing if basis not yet set
+                        fourWayRight = Vector3.Cross(Vector3.up, fourWayForward).normalized;
+                        fourWayBasisInit = true;
+                    }
+                    float f = Vector3.Dot(fourWayForward, dir);
+                    // Orbit affects only front/back, not left/right flip
+                    if (f > 0f)
+                    {
+                        target = directionalFrontSprite != null ? directionalFrontSprite : (defaultSprite != null ? defaultSprite : spriteRenderer.sprite);
+                        flipX = lastFlipX;
+                        lastWasBack = false;
+                    }
+                    else
+                    {
+                        target = directionalBackSprite != null ? directionalBackSprite : (directionalFrontSprite != null ? directionalFrontSprite : (defaultSprite != null ? defaultSprite : spriteRenderer.sprite));
+                        flipX = lastFlipX;
+                        lastWasBack = true;
+                    }
+                }
+            }
+
+            if (spriteRenderer.sprite != target) spriteRenderer.sprite = target;
+            spriteRenderer.flipX = flipX;
+            lastSpriteEvalPos = transform.position;
+        }
+        if (lockYawTo4Angles && !billboardToCamera)
+        {
+            Vector3 e = transform.eulerAngles;
+            float snappedY = Mathf.Round(e.y / 180f) * 180f;
+            if (Mathf.Abs(Mathf.DeltaAngle(e.y, snappedY)) > 0.01f)
+            {
+                e.y = snappedY;
+                transform.eulerAngles = e;
             }
         }
-        if (squashNearCamera && spriteTransform != null && mainCamera != null)
+        if (SQUASH_NEAR_CAMERA && spriteTransform != null && mainCamera != null)
         {
             Vector3 camPos = mainCamera.transform.position;
             Vector3 camFwd = mainCamera.transform.forward;
             Vector3 toSprite = spriteTransform.position - camPos;
             float depth = Vector3.Dot(toSprite, camFwd);
-            float near = mainCamera.nearClipPlane + squashNearOffset;
-            float t = 1f - Mathf.Clamp01((depth - near) / Mathf.Max(0.0001f, squashRange));
+            float near = mainCamera.nearClipPlane + SQUASH_NEAR_OFFSET;
+            float t = 1f - Mathf.Clamp01((depth - near) / Mathf.Max(0.0001f, SQUASH_RANGE));
             if (t <= 0f)
             {
                 Vector3 target = new Vector3(spriteBaseScale.x, spriteBaseScale.y, 1f);
-                spriteTransform.localScale = Vector3.Lerp(spriteTransform.localScale, target, Time.deltaTime * squashLerpSpeed);
+                spriteTransform.localScale = Vector3.Lerp(spriteTransform.localScale, target, Time.deltaTime * SQUASH_LERP_SPEED);
             }
             else
             {
@@ -268,15 +375,10 @@ public class TokenSetup : MonoBehaviour
                 float sum = Mathf.Max(0.0001f, ax + ay);
                 float horizWeight = ax / sum;
                 float vertWeight = ay / sum;
-                float targetX = Mathf.Lerp(spriteBaseScale.x, spriteBaseScale.x * maxXScaleAtMaxSquash, t * horizWeight);
-                float targetY = Mathf.Lerp(spriteBaseScale.y, spriteBaseScale.y * minYScaleAtMaxSquash, t * vertWeight);
-                spriteTransform.localScale = Vector3.Lerp(spriteTransform.localScale, new Vector3(targetX, targetY, 1f), Time.deltaTime * squashLerpSpeed);
+                float targetX = Mathf.Lerp(spriteBaseScale.x, spriteBaseScale.x * MAX_X_SCALE_AT_MAX_SQUASH, t * horizWeight);
+                float targetY = Mathf.Lerp(spriteBaseScale.y, spriteBaseScale.y * MIN_Y_SCALE_AT_MAX_SQUASH, t * vertWeight);
+                spriteTransform.localScale = Vector3.Lerp(spriteTransform.localScale, new Vector3(targetX, targetY, 1f), Time.deltaTime * SQUASH_LERP_SPEED);
             }
-        }
-        // Snap token to ground (only for tokens)
-        if (groundSnap && !externalDragActive)
-        {
-            PerformGroundSnap();
         }
     }
     
@@ -412,23 +514,6 @@ public class TokenSetup : MonoBehaviour
     {
         currentScale = scale;
         transform.localScale = Vector3.one * scale;
-        if (groundSnap && !externalDragActive)
-        {
-            SnapImmediate();
-            Bounds b;
-            if (boxCollider != null)
-                b = boxCollider.bounds;
-            else if (!TryGetCombinedBounds(out b))
-                b = new Bounds(transform.position, Vector3.zero);
-            supportBaselineY = b.min.y;
-            if (spriteRenderer != null)
-            {
-                float spriteBottomY = spriteRenderer.bounds.min.y;
-                if (spriteBottomY < supportBaselineY) supportBaselineY = spriteBottomY;
-            }
-            supportBaselineInit = true;
-            lastXZPos = transform.position;
-        }
     }
     
     public float GetCurrentScale()
@@ -457,16 +542,13 @@ public class TokenSetup : MonoBehaviour
         rb = GetComponent<Rigidbody>();
         if (rb != null)
         {
-            rb.mass = mass;
-            rb.drag = drag;
-            rb.angularDrag = angularDrag;
+            // Tokens rely on snapping, not physics
+            rb.isKinematic = true;
+            rb.useGravity = false;
             rb.interpolation = RigidbodyInterpolation.Interpolate;
             rb.collisionDetectionMode = CollisionDetectionMode.Continuous;
             // Freeze X and Z rotation to keep token upright
             rb.constraints = RigidbodyConstraints.FreezeRotationX | RigidbodyConstraints.FreezeRotationZ;
-            // Tokens rely on snapping, not physics
-            rb.isKinematic = true;
-            rb.useGravity = false;
             rb.velocity = Vector3.zero;
             rb.angularVelocity = Vector3.zero;
         }
@@ -497,13 +579,7 @@ public class TokenSetup : MonoBehaviour
         if (Application.isPlaying)
             return;
         
-        Rigidbody rbTemp = GetComponent<Rigidbody>();
-        if (rbTemp != null)
-        {
-            rbTemp.mass = mass;
-            rbTemp.drag = drag;
-            rbTemp.angularDrag = angularDrag;
-        }
+        // No RB tuning for tokens; snapping drives placement
         
         // Clamp scale
         currentScale = Mathf.Clamp(currentScale, minScale, maxScale);
@@ -514,289 +590,23 @@ public class TokenSetup : MonoBehaviour
         }
     }
 
-    private static readonly RaycastHit[] tempRayHits = new RaycastHit[32];
-    private static readonly RaycastHit[] tempBoxHits = new RaycastHit[32];
+    
 
-    private void PerformGroundSnap()
-    {
-        if (!TryComputeTargetBottomY(out float targetBottomY, out Bounds bounds))
-            return;
+    
 
-        float currentBottomY = bounds.min.y;
-        if (spriteRenderer != null)
-        {
-            float spriteBottomY = spriteRenderer.bounds.min.y;
-            if (spriteBottomY < currentBottomY) currentBottomY = spriteBottomY;
-        }
-        if (!supportBaselineInit)
-        {
-            supportBaselineY = currentBottomY;
-            supportBaselineInit = true;
-            lastXZPos = transform.position;
-        }
-        Vector2 lastXZ = new Vector2(lastXZPos.x, lastXZPos.z);
-        Vector2 curXZ = new Vector2(transform.position.x, transform.position.z);
-        if ((curXZ - lastXZ).sqrMagnitude > 0.0001f)
-        {
-            supportBaselineY = currentBottomY;
-            lastXZPos = transform.position;
-        }
-        if (targetBottomY > supportBaselineY + snapStepUpMax)
-            targetBottomY = supportBaselineY + snapStepUpMax;
-        if (targetBottomY < supportBaselineY)
-            supportBaselineY = targetBottomY;
+    
 
-        float delta = targetBottomY - currentBottomY;
-        if (Mathf.Abs(delta) > 0.0001f)
-        {
-            Vector3 targetPos = transform.position + new Vector3(0f, delta, 0f);
-            // Drop instantly when stepping down big edges; smooth only when moving up
-            if (delta < 0f)
-            {
-                transform.position = targetPos;
-            }
-            else
-            {
-                float k = 1f - Mathf.Exp(-snapLerpSpeed * Time.deltaTime);
-                transform.position = Vector3.Lerp(transform.position, targetPos, k);
-            }
-            supportBaselineY = targetBottomY;
-        }
-    }
+    
 
-    private void SnapImmediate()
-    {
-        if (!TryComputeTargetBottomY(out float targetBottomY, out Bounds bounds))
-            return;
-        float currentBottomY = bounds.min.y;
-        if (spriteRenderer != null)
-        {
-            float spriteBottomY = spriteRenderer.bounds.min.y;
-            if (spriteBottomY < currentBottomY) currentBottomY = spriteBottomY;
-        }
-        float delta = targetBottomY - currentBottomY;
-        if (Mathf.Abs(delta) > 0.0001f)
-        {
-            Vector3 p = transform.position;
-            p.y += delta;
-            transform.position = p;
-        }
-        ResolveUpwardPenetration();
-    }
+    
 
-    public void ForceSnapImmediate()
-    {
-        SnapImmediate();
-    }
+    
 
-    private bool TryComputeTargetBottomY(out float resultBottomY, out Bounds bounds)
-    {
-        if (boxCollider != null)
-            bounds = boxCollider.bounds;
-        else if (!TryGetCombinedBounds(out bounds))
-        {
-            resultBottomY = 0f;
-            return false;
-        }
+    
 
-        Vector3 c = bounds.center;
-        float originY = bounds.max.y + snapRayHeight;
-        float distance = snapRayHeight + snapMaxDistance + bounds.extents.y;
+    
 
-        // Compute both center and support candidates
-        bool centerOK = RaycastGround(new Vector3(c.x, originY, c.z), distance, out RaycastHit centerHit);
-        Vector3 halfExtents = new Vector3(
-            Mathf.Max(0.001f, bounds.extents.x - snapFootInset),
-            0.01f,
-            Mathf.Max(0.001f, bounds.extents.z - snapFootInset)
-        );
-        bool supportOK = BoxcastGround(new Vector3(c.x, originY, c.z), halfExtents, distance, out RaycastHit supportHit);
-
-        if (!centerOK && !supportOK)
-        {
-            resultBottomY = 0f;
-            return false;
-        }
-
-        float currentBottomY = bounds.min.y;
-        if (spriteRenderer != null)
-        {
-            float spriteBottomY = spriteRenderer.bounds.min.y;
-            if (spriteBottomY < currentBottomY) currentBottomY = spriteBottomY;
-        }
-        float allowedMaxY = currentBottomY + snapStepUpMax;
-        float chosenY;
-        if (centerOK)
-        {
-            float centerY = centerHit.point.y;
-            if (centerY < currentBottomY)
-            {
-                // Stepping down: follow center so we drop off edges immediately
-                chosenY = centerY;
-            }
-            else
-            {
-                // Moving up or staying level: choose the safer (higher) support to avoid sinking on irregular ground
-                float supportY = supportOK ? supportHit.point.y : centerY;
-                // Clamp upward step to allowedMaxY to avoid jumping onto ceilings/upper floors in one step
-                centerY = Mathf.Min(centerY, allowedMaxY);
-                supportY = Mathf.Min(supportY, allowedMaxY);
-                chosenY = Mathf.Max(centerY, supportY);
-            }
-        }
-        else
-        {
-            // No center hit: check corners for large step-down
-            float px = Mathf.Max(0f, bounds.extents.x - snapFootInset);
-            float pz = Mathf.Max(0f, bounds.extents.z - snapFootInset);
-            Vector3[] corners = new Vector3[4]
-            {
-                new Vector3(c.x - px, originY, c.z - pz),
-                new Vector3(c.x - px, originY, c.z + pz),
-                new Vector3(c.x + px, originY, c.z - pz),
-                new Vector3(c.x + px, originY, c.z + pz),
-            };
-            bool anyCorner = false;
-            float minCornerY = float.PositiveInfinity;
-            for (int i = 0; i < 4; i++)
-            {
-                if (RaycastGround(corners[i], distance, out RaycastHit ch))
-                {
-                    anyCorner = true;
-                    if (ch.point.y < minCornerY) minCornerY = ch.point.y;
-                }
-            }
-            if (anyCorner && (currentBottomY - minCornerY) >= stepDownMinDrop)
-            {
-                // Big edge: drop to the lower surface
-                chosenY = minCornerY;
-            }
-            else
-            {
-                // Otherwise, stay supported by the highest surface under footprint
-                float supportY = supportHit.point.y;
-                supportY = Mathf.Min(supportY, allowedMaxY);
-                chosenY = supportY;
-            }
-        }
-
-        resultBottomY = chosenY + snapOffsetY;
-        return true;
-    }
-
-    private bool TryGetCombinedBounds(out Bounds outBounds)
-    {
-        var cols = GetComponentsInChildren<Collider>();
-        if (cols == null || cols.Length == 0)
-        {
-            outBounds = new Bounds(transform.position, Vector3.zero);
-            return false;
-        }
-        outBounds = cols[0].bounds;
-        for (int i = 1; i < cols.Length; i++)
-            outBounds.Encapsulate(cols[i].bounds);
-        return true;
-    }
-
-    private bool RaycastGround(Vector3 origin, float distance, out RaycastHit bestHit)
-    {
-        bestHit = default;
-        int count = Physics.RaycastNonAlloc(origin, Vector3.down, tempRayHits, distance, groundMask, QueryTriggerInteraction.Ignore);
-        if (count == 0) return false;
-        // Fallback to full list if buffer overflow is likely
-        RaycastHit[] hits = tempRayHits;
-        if (count >= tempRayHits.Length)
-        {
-            hits = Physics.RaycastAll(origin, Vector3.down, distance, groundMask, QueryTriggerInteraction.Ignore);
-            count = hits.Length;
-            if (count == 0) return false;
-        }
-        float best = float.PositiveInfinity;
-        Transform self = transform;
-        for (int i = 0; i < count; i++)
-        {
-            var h = hits[i];
-            if (h.collider == null) continue;
-            Transform ht = h.collider.transform;
-            if (ht == null) continue;
-            if (ht == self || ht.IsChildOf(self)) continue; // ignore own colliders
-            if (h.normal.y < minGroundNormalY) continue; // skip vertical/near-vertical faces
-            if (h.distance < best)
-            {
-                best = h.distance;
-                bestHit = h;
-            }
-        }
-        return best < float.PositiveInfinity;
-    }
-
-    private void ResolveUpwardPenetration()
-    {
-        if (boxCollider == null) return;
-        // Use collider's true world box for overlap
-        Vector3 half = Vector3.Scale(boxCollider.size * 0.5f, transform.lossyScale) * 0.98f;
-        Vector3 worldCenter = transform.TransformPoint(boxCollider.center);
-        for (int iter = 0; iter < 3; iter++)
-        {
-            Collider[] overlaps = Physics.OverlapBox(worldCenter, half, transform.rotation, groundMask, QueryTriggerInteraction.Ignore);
-            bool pushed = false;
-            for (int i = 0; i < overlaps.Length; i++)
-            {
-                var other = overlaps[i];
-                if (other == null) continue;
-                if (other.transform == transform || other.transform.IsChildOf(transform)) continue;
-                // Compute minimal separation
-                if (Physics.ComputePenetration(
-                    boxCollider, transform.position, transform.rotation,
-                    other, other.transform.position, other.transform.rotation,
-                    out Vector3 dir, out float dist))
-                {
-                    Vector3 up = Vector3.Project(dir, Vector3.up);
-                    if (up.y > 0.0001f && dist > 0.0001f)
-                    {
-                        transform.position += up.normalized * dist;
-                        worldCenter = transform.TransformPoint(boxCollider.center);
-                        pushed = true;
-                    }
-                }
-            }
-            if (!pushed) break;
-        }
-    }
-
-    private bool BoxcastGround(Vector3 center, Vector3 halfExtents, float distance, out RaycastHit bestHit)
-    {
-        bestHit = default;
-        int count = Physics.BoxCastNonAlloc(center, halfExtents, Vector3.down, tempBoxHits, transform.rotation, distance, groundMask, QueryTriggerInteraction.Ignore);
-        if (count == 0) return false;
-        // Fallback to full list if buffer overflow is likely
-        RaycastHit[] hits = tempBoxHits;
-        if (count >= tempBoxHits.Length)
-        {
-            hits = Physics.BoxCastAll(center, halfExtents, Vector3.down, transform.rotation, distance, groundMask, QueryTriggerInteraction.Ignore);
-            count = hits.Length;
-            if (count == 0) return false;
-        }
-        float best = float.PositiveInfinity;
-        Transform self = transform;
-        for (int i = 0; i < count; i++)
-        {
-            var h = hits[i];
-            if (h.collider == null) continue;
-            Transform ht = h.collider.transform;
-            if (ht == null) continue;
-            if (ht == self || ht.IsChildOf(self)) continue; // ignore own colliders
-            if (h.normal.y < minGroundNormalY) continue; // skip vertical/near-vertical faces
-            // Avoid ceilings/roofs: ignore surfaces above camera height if camera is available
-            if (mainCamera != null && h.point.y > mainCamera.transform.position.y + 0.01f) continue;
-            if (h.distance < best)
-            {
-                best = h.distance;
-                bestHit = h;
-            }
-        }
-        return best < float.PositiveInfinity;
-    }
+    
 
     private void EnforceSimplePhysics()
     {
@@ -850,9 +660,56 @@ public class TokenSetup : MonoBehaviour
         return currentState;
     }
     
-    public LayerMask GetGroundMask()
+    public void MarkSpriteEvalNow()
     {
-        return groundMask;
+        lastSpriteEvalPos = transform.position;
+    }
+    public void NudgeFourWayFacingByQuarterTurns(int quarterTurns)
+    {
+        if (quarterTurns == 0) return;
+        if (!fourWayBasisInit)
+        {
+            Vector3 toCam = mainCamera != null ? (mainCamera.transform.position - transform.position) : Vector3.forward;
+            toCam.y = 0f;
+            if (toCam.sqrMagnitude > 0.000001f)
+            {
+                fourWayForward = toCam.normalized;
+                fourWayRight = Vector3.Cross(Vector3.up, fourWayForward).normalized;
+                fourWayBasisInit = true;
+            }
+        }
+        int turns = ((quarterTurns % 4) + 4) % 4;
+        for (int i = 0; i < turns; i++)
+        {
+            Vector3 nf, nr;
+            // Positive turn: rotate basis +90 degrees around Y (forward -> right)
+            nf = fourWayRight;
+            nr = -fourWayForward;
+            fourWayForward = nf;
+            fourWayRight = nr;
+        }
+        if (quarterTurns < 0)
+        {
+            // Adjust for negative by rotating 4 - turns more (equivalent to -|turns|)
+            int negTurns = ((-quarterTurns) % 4);
+            for (int i = 0; i < negTurns; i++)
+            {
+                Vector3 nf = -fourWayRight;
+                Vector3 nr = fourWayForward;
+                fourWayForward = nf;
+                fourWayRight = nr;
+            }
+        }
+    }
+    public bool IsFourWayRotationLocked { get { return lockYawTo4Angles; } }
+    public void ToggleSpriteFlipX()
+    {
+        if (spriteRenderer != null)
+        {
+            bool f = !spriteRenderer.flipX;
+            spriteRenderer.flipX = f;
+            lastFlipX = f;
+        }
     }
     
     // Debug visualization

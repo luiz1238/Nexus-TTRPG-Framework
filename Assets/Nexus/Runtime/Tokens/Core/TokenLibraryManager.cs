@@ -166,14 +166,11 @@ public class TokenLibraryManager : MonoBehaviour
         GameObject instance = Instantiate(tokenData.prefab, position, rotation);
         instance.name = tokenData.tokenName;
         var ts = instance.GetComponent<TokenSetup>();
-        if (ts != null)
+        // Ensure simple drag component exists (new logic)
+        var dragger = instance.GetComponent<TokenDraggable>();
+        if (dragger == null)
         {
-            ts.ForceSnapImmediate();
-        }
-        // Ensure simple drag component exists
-        if (instance.GetComponent<DragObjectOnGround>() == null)
-        {
-            instance.AddComponent<DragObjectOnGround>();
+            dragger = instance.AddComponent<TokenDraggable>();
         }
         
         return instance;

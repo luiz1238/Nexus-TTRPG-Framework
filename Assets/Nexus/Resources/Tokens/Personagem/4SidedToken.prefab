@@ -95,9 +95,9 @@ GameObject:
   - component: {fileID: 1936263192273774183}
   - component: {fileID: 4408284969841410262}
   - component: {fileID: 2111200713088378700}
-  - component: {fileID: 4515745335136538759}
   - component: {fileID: 769254999219347974}
   - component: {fileID: 9031599277739097204}
+  - component: {fileID: 3227138641566331795}
   m_Layer: 0
   m_Name: 4SidedToken
   m_TagString: Untagged
@@ -155,10 +155,6 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   simplePhysicsMode: 0
-  simpleStabilizeSeconds: 1
-  mass: 1
-  drag: 1
-  angularDrag: 0.5
   minScale: 0.1
   maxScale: 4
   scaleStep: 0.05
@@ -167,61 +163,12 @@ MonoBehaviour:
   directional4WayBillboard: 1
   directionalFrontSprite: {fileID: 21300000, guid: 96e3b9c0474864f7d8a6443d0d59fa9a, type: 3}
   directionalBackSprite: {fileID: 21300000, guid: d032f048b9dc2c56e9fb659110c7171f, type: 3}
-  squashNearCamera: 1
-  squashRange: 0.4
-  squashNearOffset: 0.05
-  minYScaleAtMaxSquash: 0.2
-  maxXScaleAtMaxSquash: 1.4
-  squashLerpSpeed: 10
-  groundSnap: 1
-  groundMask:
-    serializedVersion: 2
-    m_Bits: 4294967295
-  snapRayHeight: 2
-  snapMaxDistance: 20
-  snapOffsetY: 0
-  minGroundNormalY: 0.4
-  snapLerpSpeed: 20
-  snapVelocityThreshold: 0.05
-  snapFootInset: 0.05
-  snapOnStart: 1
-  snapMode: 0
-  snapStepUpMax: 0.35
-  stepDownMinDrop: 0.35
   defaultSprite: {fileID: 0}
   alternativeSprite1: {fileID: 0}
   alternativeSprite2: {fileID: 0}
   alternativeSprite3: {fileID: 0}
   alternativeSprite4: {fileID: 0}
-  externalDragActive: 0
---- !u!114 &4515745335136538759
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 8116427717472001870}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: ab4347af60699452cbcf6d7425c52dda, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  pivotOffsetToFeet: 1
-  rayStartHeight: 2
-  smoothSpeed: 10
-  minGroundNormalY: 0.4
-  maxStepUp: 0.75
-  maxStepDown: 2.5
-  maxRayDistance: 1000
-  rotationSpeed: 200
-  enableDebug: 0
-  maxXZSpeed: 8
-  feetLift: 0.01
-  netSendInterval: 0.03
-  searchUp: 0.75
-  searchDown: 2.5
-  maxStepUpNoBelow: 0.2
-  floorSwitchGraceFrames: 6
+  lockYawTo4Angles: 0
 --- !u!114 &769254999219347974
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -257,3 +204,15 @@ MonoBehaviour:
   positionThreshold: 0.01
   rotationThreshold: 1
   interpolationBackTime: 0.06
+--- !u!114 &3227138641566331795
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 8116427717472001870}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a2e7c4f423fa47d4f8d509dcea3a839e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 

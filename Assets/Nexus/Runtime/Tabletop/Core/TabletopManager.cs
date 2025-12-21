@@ -284,33 +284,9 @@ namespace Nexus
                 }
             }
 
-            float scroll = Input.GetAxis("Mouse ScrollWheel");
             
-            // Distance adjustment (scroll sem modificadores)
-            if (!Input.GetKey(KeyCode.R) && Mathf.Abs(scroll) > 0.001f)
-            {
-                currentDistance = Mathf.Clamp(currentDistance - scroll * scrollSpeed, 1f, 50f);
-            }
 
-            // Rotation (R + Scroll) works even when not dragging
-            if (Input.GetKey(KeyCode.R) && Mathf.Abs(scroll) > 0.001f)
-            {
-                Quaternion oldRotation = selectedObject.rotation;
-                float rotAmount = scroll * rotationSpeed;
-                Quaternion newRotation = oldRotation * Quaternion.Euler(Vector3.up * rotAmount);
-                if (selectedRigidbody != null)
-                    selectedRigidbody.MoveRotation(newRotation);
-                else
-                    selectedObject.rotation = newRotation;
-                targetRotation = newRotation;
-                undoStack.Push(new UndoAction
-                {
-                    actionType = UndoActionType.Rotate,
-                    targetObject = selectedObject.gameObject,
-                    oldRotation = oldRotation,
-                    newRotation = newRotation
-                });
-            }
+            
         }
 
         private void MoveSelectedObject()
@@ -326,12 +302,10 @@ namespace Nexus
             {
                 // Direct position update for kinematic rigidbody
                 selectedRigidbody.MovePosition(targetPos);
-                selectedRigidbody.MoveRotation(targetRotation);
             }
             else if (selectedObject != null)
             {
                 selectedObject.position = targetPos;
-                selectedObject.rotation = targetRotation;
             }
         }
 

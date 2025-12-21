@@ -25,7 +25,7 @@ public static class TokenCreatorEditor
         bc.size = new Vector3(1f, 0.2f, 1f);
         bc.center = new Vector3(0f, 0.1f, 0f);
 
-        root.AddComponent<DragObjectOnGround>();
+        var dragger = root.AddComponent<TokenDraggable>();
         root.AddComponent<NetworkIdentity>();
         root.AddComponent<NetworkedToken>();
 
